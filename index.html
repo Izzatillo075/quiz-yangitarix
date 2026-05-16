@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quiz</title>
+  <style>
+    :root{--bg:#0b0f14;--card:#121a23;--text:#e8eef6;--muted:#9fb0c3;--accent:#4aa3ff;--ok:#2ecc71;--bad:#ff5c5c;--border:rgba(255,255,255,.10)}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;background:linear-gradient(180deg,#070a0e,#0b0f14 40%,#070a0e);color:var(--text);min-height:100vh;}
+    .wrap{max-width:920px;margin:0 auto;padding:16px 14px 72px;}
+    .card{background:rgba(18,26,35,.92);border:1px solid var(--border);border-radius:18px;box-shadow:0 12px 30px rgba(0,0,0,.35);overflow:hidden}
+    .topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)}
+    .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:13px}
+    .pill strong{color:var(--text);font-weight:650}
+    .title{font-size:18px;font-weight:750;letter-spacing:.2px}
+    .content{padding:14px}
+    .btnrow{display:flex;gap:10px;flex-wrap:wrap}
+    button{appearance:none;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--text);padding:12px 14px;border-radius:14px;font-size:16px;font-weight:650;cursor:pointer;flex:1;min-width:140px}
+    button.primary{border-color:rgba(74,163,255,.55);background:rgba(74,163,255,.14)}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    .qtext{font-size:18px;line-height:1.35;margin:10px 0 14px;white-space:pre-wrap}
+    .optlist{display:grid;gap:10px}
+    .opt{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left}
+    .badge{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:10px;border:1px solid var(--border);color:var(--muted);font-weight:800;flex:0 0 30px}
+    .opt .txt{flex:1;white-space:pre-wrap}
+    .opt.selected{border-color:rgba(74,163,255,.75);background:rgba(74,163,255,.10)}
+    .opt.correct{border-color:rgba(46,204,113,.7);background:rgba(46,204,113,.10)}
+    .opt.wrong{border-color:rgba(255,92,92,.75);background:rgba(255,92,92,.10)}
+    .hint{margin:8px 0 0;color:var(--muted);font-size:13px}
+    .statusline{margin:10px 0 0;color:var(--muted);font-size:14px}
+    .statusline strong{color:var(--text)}
+    .footer-watermark{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;text-align:center;color:rgba(255,255,255,.35);font-size:13px;backdrop-filter:blur(10px);background:rgba(0,0,0,.35);border-top:1px solid rgba(255,255,255,.08)}
+    .center{text-align:center}
+    .big{font-size:22px;font-weight:800;margin:8px 0 0}
+    .small{font-size:13px;color:var(--muted)}
+    a{color:var(--accent)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="app">
+      <div class="topbar">
+        <div class="title" id="topTitle">Quiz</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <div class="pill" id="pillUser">User: <strong>—</strong></div>
+          <div class="pill" id="pillProg">Approved: <strong>0/25</strong> • Correct: <strong>0</strong></div>
+          <div class="pill" id="pillTime">Time: <strong>40:00</strong></div>
+        </div>
+      </div>
+      <div class="content" id="view"></div>
+    </div>
+  </div>
+
+  <div class="footer-watermark">made by Eli Scott</div>
+
+  <script src="questions.js"></script>
+  <script>
+    // ----------------- helpers -----------------
+    const $ = (id) => document.getElementById(id);
+    function shuffle(arr){
+      for(let i=arr.length-1;i>0;i--){
+        const j=Math.floor(Math.random()*(i+1));
+        [arr[i],arr[j]]=[arr[j],arr[i]];
+      }
+      return arr;
+    }
+    function pad2(n){return String(n).padStart(2,'0');}
+    function formatTime(sec){
+      const m=Math.floor(sec/60), s=sec%60;
+      return `${pad2(m)}:${pad2(s)}`;
+    }
+
+    // ----------------- state -----------------
+    const TOTAL_QUESTIONS = 25;
+    const TIME_LIMIT_SEC = 40 * 60;
+
+    let state = {
+      user: null,
+      pool: [],          // selected 25 question objects
+      queue: [],         // working queue (skip pushes back)
+      current: null,
+      currentShuffled: [],
+      selectedIdx: null,
+      approved: 0,
+      correct: 0,
+      timer: TIME_LIMIT_SEC,
+      timerHandle: null,
+      phase: 'pickUser', // pickUser | inQuiz | finished
+      checked: false,
+    };
+
+    function setTop(){
+      $('pillUser').innerHTML = `User: <strong>${state.user ?? '—'}</strong>`;
+      $('pillProg').innerHTML = `Approved: <strong>${state.approved}/${TOTAL_QUESTIONS}</strong> • Correct: <strong>${state.correct}</strong>`;
+      $('pillTime').innerHTML = `Time: <strong>${formatTime(state.timer)}</strong>`;
+    }
+
+    function stopTimer(){
+      if(state.timerHandle){
+        clearInterval(state.timerHandle);
+        state.timerHandle=null;
+      }
+    }
+
+    function startTimer(){
+      stopTimer();
+      state.timerHandle = setInterval(() => {
+        state.timer -= 1;
+        setTop();
+        if(state.timer <= 0){
+          state.timer = 0;
+          setTop();
+          finishQuiz(true);
+        }
+      }, 1000);
+    }
+
+    function selectCustomUser() {
+    const input = document.getElementById("customName").value.trim();
+    if (input === "") {
+      alert("Enter a name or select one");
+      return;
+    }
+    selectUser(input);
+  }
+    // ----------------- views -----------------
+    function renderUserPick(){
+      state.phase='pickUser';
+      stopTimer();
+      state.timer=TIME_LIMIT_SEC;
+      state.approved=0; state.correct=0;
+      setTop();
+      $('topTitle').textContent = 'Choose user';
+
+      $('view').innerHTML = `
+        <div class="center">
+          <div class="big">Select who is taking the quiz</div>
+          <div class="small">You will start immediately. 25 random questions. 40 minutes.</div>
+        </div>
+        <div style="height:14px"></div>
+        <div class="btnrow">
+          <button class="primary" id="btnHum">K-34-25</button>
+          <button class="primary" id="btnIzz">K-35-25</button>
+
+<br><br>
+        </div>
+        <div class="hint">Tip: If you open this on a phone, add it to Home Screen for full-screen feel.</div>
+      `;
+
+      $('btnHum').onclick = () => begin('K-34-25');
+      $('btnIzz').onclick = () => begin('K-35-25');
+    }
+
+    function begin(user){
+      state.user=user;
+      // pick 25 random distinct questions
+      const all = Array.isArray(window.QUESTIONS) ? window.QUESTIONS : [];
+      if(all.length < TOTAL_QUESTIONS){
+        alert('Not enough questions loaded.');
+        return;
+      }
+      const idx = shuffle([...Array(all.length).keys()]).slice(0, TOTAL_QUESTIONS);
+      state.pool = idx.map(i => all[i]);
+      state.queue = [...state.pool];
+      state.approved = 0;
+      state.correct = 0;
+      state.timer = TIME_LIMIT_SEC;
+      state.checked = false;
+      state.selectedIdx = null;
+      state.phase='inQuiz';
+      $('topTitle').textContent = 'Quiz';
+      setTop();
+      startTimer();
+      nextQuestion();
+    }
+
+    function buildShuffledOptions(q){
+      const entries = Object.entries(q.options || {});
+      // entries like [['A','text'], ...]
+      const correctKey = q.correct;
+      const items = entries.map(([k, text]) => ({
+        origKey: k,
+        text,
+        isCorrect: k === correctKey
+      }));
+      shuffle(items);
+      return items;
+    }
+
+    function renderQuestion(){
+      const q = state.current;
+      const opts = state.currentShuffled;
+      state.selectedIdx = null;
+      state.checked = false;
+      setTop();
+
+      const optHtml = opts.map((o, i) => {
+        const label = String.fromCharCode('A'.charCodeAt(0) + i);
+        return `
+          <button class="opt" data-idx="${i}" aria-label="Option ${label}">
+            <span class="badge">${label}</span>
+            <span class="txt">${escapeHtml(o.text)}</span>
+          </button>
+        `;
+      }).join('');
+
+      $('view').innerHTML = `
+        <div class="statusline">
+          Question in queue: <strong>${TOTAL_QUESTIONS - state.queue.length + 1}</strong> / <strong>${TOTAL_QUESTIONS}</strong>
+          <span style="opacity:.6">•</span>
+          Approved: <strong>${state.approved}</strong>
+          <span style="opacity:.6">•</span>
+          Correct: <strong>${state.correct}</strong>
+        </div>
+        <div class="qtext">${escapeHtml(q.question)}</div>
+        <div class="optlist" id="optlist">${optHtml}</div>
+        <div style="height:12px"></div>
+        <div class="btnrow">
+          <button class="primary" id="btnApprove" disabled>Approve</button>
+          <button id="btnSkip">Skip</button>
+        </div>
+        <div class="hint" id="hintArea">Select an option, then approve.</div>
+      `;
+
+      // option click
+      const list = $('optlist');
+      list.querySelectorAll('.opt').forEach(btn => {
+        btn.onclick = () => {
+          if(state.checked) return;
+          const i = Number(btn.dataset.idx);
+          state.selectedIdx = i;
+          list.querySelectorAll('.opt').forEach(b => b.classList.remove('selected'));
+          btn.classList.add('selected');
+          $('btnApprove').disabled = false;
+        };
+      });
+
+      $('btnSkip').onclick = () => {
+        if(state.checked) return;
+        // put this question back to end of queue
+        state.queue.push(q);
+        nextQuestion();
+      };
+
+      $('btnApprove').onclick = () => {
+        if(!state.checked){
+          checkAnswer();
+        } else {
+          nextQuestion();
+        }
+      };
+    }
+
+    function checkAnswer(){
+      if(state.selectedIdx === null) return;
+      state.checked = true;
+      state.approved += 1;
+
+      const opts = state.currentShuffled;
+      const chosen = opts[state.selectedIdx];
+      const correctIdx = opts.findIndex(o => o.isCorrect);
+
+      const list = $('optlist');
+      const btns = [...list.querySelectorAll('.opt')];
+
+      // disable all
+      btns.forEach(b => b.disabled = true);
+      $('btnSkip').disabled = true;
+
+      // mark correct
+      if(correctIdx >= 0) btns[correctIdx].classList.add('correct');
+
+      let msg='';
+      if(chosen && chosen.isCorrect){
+        state.correct += 1;
+        msg = 'Correct+';
+      } else {
+        if(state.selectedIdx >= 0) btns[state.selectedIdx].classList.add('wrong');
+        msg = 'Wrong - ';
+      }
+
+      setTop();
+      $('hintArea').textContent = msg;
+      const approveBtn = $('btnApprove');
+      approveBtn.textContent = 'Next';
+      approveBtn.disabled = false;
+
+      if(state.approved >= TOTAL_QUESTIONS){
+        finishQuiz(false);
+      }
+    }
+
+    function nextQuestion(){
+      if(state.phase !== 'inQuiz') return;
+      if(state.approved >= TOTAL_QUESTIONS){
+        finishQuiz(false);
+        return;
+      }
+      // take from front
+      state.current = state.queue.shift();
+      state.currentShuffled = buildShuffledOptions(state.current);
+      $('btnApprove') && ($('btnApprove').textContent='Approve');
+      renderQuestion();
+    }
+
+    function finishQuiz(timeout){
+      if(state.phase === 'finished') return;
+      state.phase='finished';
+      stopTimer();
+      setTop();
+      $('topTitle').textContent = 'Result';
+
+      const used = TIME_LIMIT_SEC - state.timer;
+      $('view').innerHTML = `
+        <div class="center">
+          <div class="big">${timeout ? 'Time is up.' : 'Finished.'}</div>
+          <div class="small">User: <strong>${escapeHtml(state.user || '')}</strong></div>
+        </div>
+        <div style="height:14px"></div>
+        <div class="card" style="border-radius:16px">
+          <div class="content">
+            <div class="statusline">Approved: <strong>${state.approved}/${TOTAL_QUESTIONS}</strong></div>
+            <div class="statusline">Correct (out of approved): <strong>${state.correct}</strong></div>
+            <div class="statusline">Time used: <strong>${formatTime(used)}</strong> (limit 40:00)</div>
+            <div class="statusline">Time left: <strong>${formatTime(state.timer)}</strong></div>
+          </div>
+        </div>
+        <div style="height:12px"></div>
+        <div class="btnrow">
+          <button class="primary" id="btnRestart">Restart</button>
+          <button id="btnChangeUser">Change user</button>
+        </div>
+        <div class="hint">Restart will generate a new random set of 25 questions and reshuffle options.</div>
+      `;
+
+      $('btnRestart').onclick = () => begin(state.user || 'Izzatillo');
+      $('btnChangeUser').onclick = () => renderUserPick();
+    }
+
+    function escapeHtml(str){
+      return String(str)
+        .replaceAll('&','&amp;')
+        .replaceAll('<','&lt;')
+        .replaceAll('>','&gt;')
+        .replaceAll('"','&quot;')
+        .replaceAll("'",'&#039;');
+    }
+
+    // boot
+    renderUserPick();
+  </script>
+</body>
+</html>
