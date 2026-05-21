@@ -35,15 +35,44 @@
     .big{font-size:22px;font-weight:800;margin:8px 0 0}
     .small{font-size:13px;color:var(--muted)}
     a{color:var(--accent)}
+
+    /* confetti canvas */
+    #confetti-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999;display:none}
+
+    /* hype text */
+    .hype{
+      font-size:26px;font-weight:900;line-height:1.5;text-align:center;
+      background:linear-gradient(135deg,#ffd700 0%,#ff6b6b 35%,#4aa3ff 65%,#2ecc71 100%);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+      margin:10px 0 6px;
+      animation: hypepulse 1.8s ease-in-out infinite alternate;
+    }
+    @keyframes hypepulse{
+      from{filter:brightness(1) drop-shadow(0 0 8px rgba(255,215,0,.4));}
+      to{filter:brightness(1.25) drop-shadow(0 0 18px rgba(74,163,255,.6));}
+    }
+
+    /* BOSHLASH big button */
+    #btnStart{
+      font-size:22px;
+      padding:18px;
+      letter-spacing:1px;
+      border-color:rgba(74,163,255,.65);
+      background:rgba(74,163,255,.18);
+      transition: background .2s, transform .1s;
+    }
+    #btnStart:hover{background:rgba(74,163,255,.28);transform:scale(1.02);}
+    #btnStart:active{transform:scale(.98);}
   </style>
 </head>
 <body>
+  <canvas id="confetti-canvas"></canvas>
+
   <div class="wrap">
     <div class="card" id="app">
       <div class="topbar">
         <div class="title" id="topTitle">Quiz</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-          <div class="pill" id="pillUser">User: <strong>—</strong></div>
           <div class="pill" id="pillProg">Approved: <strong>0/25</strong> • Correct: <strong>0</strong></div>
           <div class="pill" id="pillTime">Time: <strong>40:00</strong></div>
         </div>
@@ -56,8 +85,8 @@
 
   <script src="questions.js"></script>
   <script>
-    // ----------------- helpers -----------------
     const $ = (id) => document.getElementById(id);
+
     function shuffle(arr){
       for(let i=arr.length-1;i>0;i--){
         const j=Math.floor(Math.random()*(i+1));
@@ -67,151 +96,140 @@
     }
     function pad2(n){return String(n).padStart(2,'0');}
     function formatTime(sec){
-      const m=Math.floor(sec/60), s=sec%60;
+      const m=Math.floor(sec/60),s=sec%60;
       return `${pad2(m)}:${pad2(s)}`;
     }
 
-    // ----------------- state -----------------
+    // ── state ──────────────────────────────────────────────
     const TOTAL_QUESTIONS = 25;
-    const TIME_LIMIT_SEC = 40 * 60;
+    const TIME_LIMIT_SEC  = 40 * 60;
 
     let state = {
-      user: null,
-      pool: [],          // selected 25 question objects
-      queue: [],         // working queue (skip pushes back)
-      current: null,
-      currentShuffled: [],
-      selectedIdx: null,
-      approved: 0,
-      correct: 0,
-      timer: TIME_LIMIT_SEC,
-      timerHandle: null,
-      phase: 'pickUser', // pickUser | inQuiz | finished
-      checked: false,
+      pool:[],queue:[],current:null,currentShuffled:[],
+      selectedIdx:null,approved:0,correct:0,
+      timer:TIME_LIMIT_SEC,timerHandle:null,
+      phase:'start',checked:false,
     };
 
     function setTop(){
-      $('pillUser').innerHTML = `User: <strong>${state.user ?? '—'}</strong>`;
-      $('pillProg').innerHTML = `Approved: <strong>${state.approved}/${TOTAL_QUESTIONS}</strong> • Correct: <strong>${state.correct}</strong>`;
-      $('pillTime').innerHTML = `Time: <strong>${formatTime(state.timer)}</strong>`;
+      $('pillProg').innerHTML=`Approved: <strong>${state.approved}/${TOTAL_QUESTIONS}</strong> • Correct: <strong>${state.correct}</strong>`;
+      $('pillTime').innerHTML=`Time: <strong>${formatTime(state.timer)}</strong>`;
     }
-
     function stopTimer(){
-      if(state.timerHandle){
-        clearInterval(state.timerHandle);
-        state.timerHandle=null;
-      }
+      if(state.timerHandle){clearInterval(state.timerHandle);state.timerHandle=null;}
     }
-
     function startTimer(){
       stopTimer();
-      state.timerHandle = setInterval(() => {
-        state.timer -= 1;
-        setTop();
-        if(state.timer <= 0){
-          state.timer = 0;
-          setTop();
-          finishQuiz(true);
-        }
-      }, 1000);
+      state.timerHandle=setInterval(()=>{
+        state.timer-=1; setTop();
+        if(state.timer<=0){state.timer=0;setTop();finishQuiz(true);}
+      },1000);
     }
 
-    function selectCustomUser() {
-    const input = document.getElementById("customName").value.trim();
-    if (input === "") {
-      alert("Enter a name or select one");
-      return;
-    }
-    selectUser(input);
-  }
-    // ----------------- views -----------------
-    function renderUserPick(){
-      state.phase='pickUser';
-      stopTimer();
-      state.timer=TIME_LIMIT_SEC;
-      state.approved=0; state.correct=0;
-      setTop();
-      $('topTitle').textContent = 'Choose user';
-
-      $('view').innerHTML = `
-        <div class="center">
-          <div class="big">Select who is taking the quiz</div>
-          <div class="small">You will start immediately. 25 random questions. 40 minutes.</div>
-        </div>
-        <div style="height:14px"></div>
-        <div class="btnrow">
-          <button class="primary" id="btnHum">K-35-25</button>
-          <button class="primary" id="btnIzz">Qizumas</button>
-
-<br><br>
-        </div>
-        <div class="hint">Tip: If you open this on a phone, add it to Home Screen for full-screen feel.</div>
-      `;
-
-      $('btnHum').onclick = () => begin('K-35-25');
-      $('btnIzz').onclick = () => begin('Qizumas');
-    }
-
-    function begin(user){
-      state.user=user;
-      // pick 25 random distinct questions
-      const all = Array.isArray(window.QUESTIONS) ? window.QUESTIONS : [];
-      if(all.length < TOTAL_QUESTIONS){
-        alert('Not enough questions loaded.');
-        return;
+    // ── confetti ───────────────────────────────────────────
+    let confettiRaf=null;
+    function startConfetti(){
+      const canvas=$('confetti-canvas');
+      canvas.style.display='block';
+      canvas.width=window.innerWidth;
+      canvas.height=window.innerHeight;
+      const ctx=canvas.getContext('2d');
+      const COLORS=['#ffd700','#ff6b6b','#4aa3ff','#2ecc71','#ff69b4','#ff8c00','#9b59b6','#ffffff'];
+      const P=Array.from({length:200},()=>({
+        x:Math.random()*canvas.width,
+        y:Math.random()*canvas.height-canvas.height,
+        r:Math.random()*7+4,
+        color:COLORS[Math.floor(Math.random()*COLORS.length)],
+        speed:Math.random()*3.5+1.5,
+        angle:Math.random()*Math.PI*2,
+        spin:(Math.random()-.5)*.25,
+        drift:(Math.random()-.5)*1.8,
+        shape:Math.random()>.5?'rect':'circle',
+        w:Math.random()*10+6,h:Math.random()*6+3,
+      }));
+      function draw(){
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        P.forEach(p=>{
+          ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.angle);
+          ctx.fillStyle=p.color;
+          if(p.shape==='rect'){ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);}
+          else{ctx.beginPath();ctx.arc(0,0,p.r/2,0,Math.PI*2);ctx.fill();}
+          ctx.restore();
+          p.y+=p.speed; p.x+=p.drift; p.angle+=p.spin;
+          if(p.y>canvas.height+20){p.y=-20;p.x=Math.random()*canvas.width;}
+        });
+        confettiRaf=requestAnimationFrame(draw);
       }
-      const idx = shuffle([...Array(all.length).keys()]).slice(0, TOTAL_QUESTIONS);
-      state.pool = idx.map(i => all[i]);
-      state.queue = [...state.pool];
-      state.approved = 0;
-      state.correct = 0;
-      state.timer = TIME_LIMIT_SEC;
-      state.checked = false;
-      state.selectedIdx = null;
-      state.phase='inQuiz';
-      $('topTitle').textContent = 'Quiz';
+      draw();
+      setTimeout(stopConfetti,8000);
+    }
+    function stopConfetti(){
+      if(confettiRaf){cancelAnimationFrame(confettiRaf);confettiRaf=null;}
+      const c=$('confetti-canvas');if(c)c.style.display='none';
+    }
+
+    // ── audio ──────────────────────────────────────────────
+    let cheerAudio=null;
+    function playCheer(){
+      cheerAudio=new Audio('https://assets.mixkit.co/sfx/preview/mixkit-crowd-cheering-and-clapping-476.mp3');
+      cheerAudio.volume=0.85;
+      cheerAudio.play().catch(()=>{});
+      setTimeout(()=>{if(cheerAudio){cheerAudio.pause();cheerAudio=null;}},8000);
+    }
+
+    // ── views ──────────────────────────────────────────────
+    function renderStart(){
+      state.phase='start';
+      stopTimer();stopConfetti();
+      state.timer=TIME_LIMIT_SEC;state.approved=0;state.correct=0;
       setTop();
-      startTimer();
-      nextQuestion();
+      $('topTitle').textContent='Quiz';
+      $('view').innerHTML=`
+        <div class="center">
+          <div class="big" style="margin-bottom:10px;">Tayyor bo'lsangiz bosing</div>
+          <div class="small">25 ta tasodifiy savol &nbsp;•&nbsp; 40 daqiqa</div>
+        </div>
+        <div style="height:20px"></div>
+        <div class="btnrow">
+          <button class="primary" id="btnStart">BOSHLASH</button>
+        </div>
+        <div class="hint">Maslahat: Telefondan kirmoqchi bo'lsangiz, sahifani Home Screen'ga qo'shing.</div>
+      `;
+      $('btnStart').onclick=()=>begin();
+    }
+
+    function begin(){
+      const all=Array.isArray(window.QUESTIONS)?window.QUESTIONS:[];
+      if(all.length<TOTAL_QUESTIONS){alert('Not enough questions loaded.');return;}
+      const idx=shuffle([...Array(all.length).keys()]).slice(0,TOTAL_QUESTIONS);
+      state.pool=idx.map(i=>all[i]);
+      state.queue=[...state.pool];
+      state.approved=0;state.correct=0;
+      state.timer=TIME_LIMIT_SEC;state.checked=false;state.selectedIdx=null;
+      state.phase='inQuiz';
+      $('topTitle').textContent='Quiz';
+      setTop();startTimer();nextQuestion();
     }
 
     function buildShuffledOptions(q){
-      const entries = Object.entries(q.options || {});
-      // entries like [['A','text'], ...]
-      const correctKey = q.correct;
-      const items = entries.map(([k, text]) => ({
-        origKey: k,
-        text,
-        isCorrect: k === correctKey
-      }));
-      shuffle(items);
-      return items;
+      const correctKey=q.correct;
+      return shuffle(Object.entries(q.options||{}).map(([k,text])=>({origKey:k,text,isCorrect:k===correctKey})));
     }
 
     function renderQuestion(){
-      const q = state.current;
-      const opts = state.currentShuffled;
-      state.selectedIdx = null;
-      state.checked = false;
-      setTop();
-
-      const optHtml = opts.map((o, i) => {
-        const label = String.fromCharCode('A'.charCodeAt(0) + i);
-        return `
-          <button class="opt" data-idx="${i}" aria-label="Option ${label}">
-            <span class="badge">${label}</span>
-            <span class="txt">${escapeHtml(o.text)}</span>
-          </button>
-        `;
+      const q=state.current,opts=state.currentShuffled;
+      state.selectedIdx=null;state.checked=false;setTop();
+      const optHtml=opts.map((o,i)=>{
+        const lbl=String.fromCharCode(65+i);
+        return `<button class="opt" data-idx="${i}" aria-label="Option ${lbl}">
+          <span class="badge">${lbl}</span><span class="txt">${escapeHtml(o.text)}</span>
+        </button>`;
       }).join('');
-
-      $('view').innerHTML = `
+      $('view').innerHTML=`
         <div class="statusline">
-          Question in queue: <strong>${TOTAL_QUESTIONS - state.queue.length + 1}</strong> / <strong>${TOTAL_QUESTIONS}</strong>
-          <span style="opacity:.6">•</span>
-          Approved: <strong>${state.approved}</strong>
-          <span style="opacity:.6">•</span>
-          Correct: <strong>${state.correct}</strong>
+          Savol: <strong>${TOTAL_QUESTIONS-state.queue.length+1}</strong> / <strong>${TOTAL_QUESTIONS}</strong>
+          <span style="opacity:.6">•</span> Approved: <strong>${state.approved}</strong>
+          <span style="opacity:.6">•</span> Correct: <strong>${state.correct}</strong>
         </div>
         <div class="qtext">${escapeHtml(q.question)}</div>
         <div class="optlist" id="optlist">${optHtml}</div>
@@ -220,135 +238,110 @@
           <button class="primary" id="btnApprove" disabled>Approve</button>
           <button id="btnSkip">Skip</button>
         </div>
-        <div class="hint" id="hintArea">Select an option, then approve.</div>
+        <div class="hint" id="hintArea">Javobni tanlang, so'ng Approve bosing.</div>
       `;
-
-      // option click
-      const list = $('optlist');
-      list.querySelectorAll('.opt').forEach(btn => {
-        btn.onclick = () => {
-          if(state.checked) return;
-          const i = Number(btn.dataset.idx);
-          state.selectedIdx = i;
-          list.querySelectorAll('.opt').forEach(b => b.classList.remove('selected'));
+      const list=$('optlist');
+      list.querySelectorAll('.opt').forEach(btn=>{
+        btn.onclick=()=>{
+          if(state.checked)return;
+          state.selectedIdx=Number(btn.dataset.idx);
+          list.querySelectorAll('.opt').forEach(b=>b.classList.remove('selected'));
           btn.classList.add('selected');
-          $('btnApprove').disabled = false;
+          $('btnApprove').disabled=false;
         };
       });
-
-      $('btnSkip').onclick = () => {
-        if(state.checked) return;
-        // put this question back to end of queue
-        state.queue.push(q);
-        nextQuestion();
-      };
-
-      $('btnApprove').onclick = () => {
-        if(!state.checked){
-          checkAnswer();
-        } else {
-          nextQuestion();
-        }
-      };
+      $('btnSkip').onclick=()=>{if(!state.checked){state.queue.push(q);nextQuestion();}};
+      $('btnApprove').onclick=()=>{if(!state.checked){checkAnswer();}else{nextQuestion();}};
     }
 
     function checkAnswer(){
-      if(state.selectedIdx === null) return;
-      state.checked = true;
-      state.approved += 1;
-
-      const opts = state.currentShuffled;
-      const chosen = opts[state.selectedIdx];
-      const correctIdx = opts.findIndex(o => o.isCorrect);
-
-      const list = $('optlist');
-      const btns = [...list.querySelectorAll('.opt')];
-
-      // disable all
-      btns.forEach(b => b.disabled = true);
-      $('btnSkip').disabled = true;
-
-      // mark correct
-      if(correctIdx >= 0) btns[correctIdx].classList.add('correct');
-
+      if(state.selectedIdx===null)return;
+      state.checked=true;state.approved+=1;
+      const opts=state.currentShuffled,chosen=opts[state.selectedIdx];
+      const correctIdx=opts.findIndex(o=>o.isCorrect);
+      const btns=[...$('optlist').querySelectorAll('.opt')];
+      btns.forEach(b=>b.disabled=true);
+      $('btnSkip').disabled=true;
+      if(correctIdx>=0)btns[correctIdx].classList.add('correct');
       let msg='';
-      if(chosen && chosen.isCorrect){
-        state.correct += 1;
-        msg = 'Correct+';
-      } else {
-        if(state.selectedIdx >= 0) btns[state.selectedIdx].classList.add('wrong');
-        msg = 'Wrong - ';
-      }
-
+      if(chosen&&chosen.isCorrect){state.correct+=1;msg='✓ To\'g\'ri!';}
+      else{if(state.selectedIdx>=0)btns[state.selectedIdx].classList.add('wrong');msg='✗ Noto\'g\'ri';}
       setTop();
-      $('hintArea').textContent = msg;
-      const approveBtn = $('btnApprove');
-      approveBtn.textContent = 'Next';
-      approveBtn.disabled = false;
-
-      if(state.approved >= TOTAL_QUESTIONS){
-        finishQuiz(false);
-      }
+      $('hintArea').textContent=msg;
+      $('btnApprove').textContent='Next';
+      $('btnApprove').disabled=false;
+      if(state.approved>=TOTAL_QUESTIONS)finishQuiz(false);
     }
 
     function nextQuestion(){
-      if(state.phase !== 'inQuiz') return;
-      if(state.approved >= TOTAL_QUESTIONS){
-        finishQuiz(false);
-        return;
-      }
-      // take from front
-      state.current = state.queue.shift();
-      state.currentShuffled = buildShuffledOptions(state.current);
-      $('btnApprove') && ($('btnApprove').textContent='Approve');
+      if(state.phase!=='inQuiz')return;
+      if(state.approved>=TOTAL_QUESTIONS){finishQuiz(false);return;}
+      state.current=state.queue.shift();
+      state.currentShuffled=buildShuffledOptions(state.current);
+      $('btnApprove')&&($('btnApprove').textContent='Approve');
       renderQuestion();
     }
 
     function finishQuiz(timeout){
-      if(state.phase === 'finished') return;
+      if(state.phase==='finished')return;
       state.phase='finished';
-      stopTimer();
-      setTop();
-      $('topTitle').textContent = 'Result';
+      stopTimer();setTop();
+      $('topTitle').textContent='Natija';
+      const used=TIME_LIMIT_SEC-state.timer;
+      const perfect=!timeout&&state.correct===TOTAL_QUESTIONS;
 
-      const used = TIME_LIMIT_SEC - state.timer;
-      $('view').innerHTML = `
-        <div class="center">
-          <div class="big">${timeout ? 'Time is up.' : 'Finished.'}</div>
-          <div class="small">User: <strong>${escapeHtml(state.user || '')}</strong></div>
-        </div>
-        <div style="height:14px"></div>
+      if(perfect){startConfetti();playCheer();}
+
+      $('view').innerHTML = perfect ? `
+        <div style="height:8px"></div>
+        <div class="hype">Qoyilmaqom!<br>Tabriklaymiz barcha savollarga to'g'ri javob berdingiz<br>Ota-onangizga rahmat!!!</div>
+        <div style="height:10px"></div>
         <div class="card" style="border-radius:16px">
           <div class="content">
-            <div class="statusline">Approved: <strong>${state.approved}/${TOTAL_QUESTIONS}</strong></div>
-            <div class="statusline">Correct (out of approved): <strong>${state.correct}</strong></div>
-            <div class="statusline">Time used: <strong>${formatTime(used)}</strong> (limit 40:00)</div>
-            <div class="statusline">Time left: <strong>${formatTime(state.timer)}</strong></div>
+            <div class="statusline">To'g'ri javoblar: <strong>${state.correct} / ${TOTAL_QUESTIONS}</strong></div>
+            <div class="statusline">Sarflangan vaqt: <strong>${formatTime(used)}</strong></div>
+            <div class="statusline">Qolgan vaqt: <strong>${formatTime(state.timer)}</strong></div>
           </div>
         </div>
         <div style="height:12px"></div>
         <div class="btnrow">
-          <button class="primary" id="btnRestart">Restart</button>
-          <button id="btnChangeUser">Change user</button>
+          <button class="primary" id="btnRestart">Qayta boshlash</button>
         </div>
-        <div class="hint">Restart will generate a new random set of 25 questions and reshuffle options.</div>
+      ` : `
+        <div class="center">
+          <div class="big">${timeout?'⏰ Vaqt tugadi.':'Tugadi.'}</div>
+        </div>
+        <div style="height:14px"></div>
+        <div class="card" style="border-radius:16px">
+          <div class="content">
+            <div class="statusline">Tasdiqlangan: <strong>${state.approved} / ${TOTAL_QUESTIONS}</strong></div>
+            <div class="statusline">To'g'ri javoblar: <strong>${state.correct}</strong></div>
+            <div class="statusline">Sarflangan vaqt: <strong>${formatTime(used)}</strong></div>
+            <div class="statusline">Qolgan vaqt: <strong>${formatTime(state.timer)}</strong></div>
+          </div>
+        </div>
+        <div style="height:12px"></div>
+        <div class="btnrow">
+          <button class="primary" id="btnRestart">Qayta boshlash</button>
+        </div>
+        <div class="hint">Qayta boshlash yangi 25 ta tasodifiy savol va aralashtirilgan variantlarni yaratadi.</div>
       `;
 
-      $('btnRestart').onclick = () => begin(state.user || 'Izzatillo');
-      $('btnChangeUser').onclick = () => renderUserPick();
+      $('btnRestart').onclick=()=>{
+        stopConfetti();
+        if(cheerAudio){cheerAudio.pause();cheerAudio=null;}
+        begin();
+      };
     }
 
     function escapeHtml(str){
       return String(str)
-        .replaceAll('&','&amp;')
-        .replaceAll('<','&lt;')
-        .replaceAll('>','&gt;')
-        .replaceAll('"','&quot;')
+        .replaceAll('&','&amp;').replaceAll('<','&lt;')
+        .replaceAll('>','&gt;').replaceAll('"','&quot;')
         .replaceAll("'",'&#039;');
     }
 
-    // boot
-    renderUserPick();
+    renderStart();
   </script>
 </body>
 </html>
